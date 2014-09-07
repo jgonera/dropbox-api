@@ -1,11 +1,11 @@
-Dropbox::API - Dropbox Ruby API client
+Dropbox::API - Dropbox Ruby API client (PeteMS fork...)
 =========
 
-A Ruby client for the DropBox REST API.
+A Ruby client for the Dropbox REST API.
 
 Goal:
 
-To deliver a more Rubyesque experience when using the DropBox API.
+To deliver a more Rubyesque experience when using the Dropbox API.
 
 Current state:
 
@@ -14,11 +14,11 @@ First release, whole API covered.
 Important!!!
 ------------
 
-From version 0.2.0, Dropbox::API::File#delete and Dropbox::API::Dir#delete *are gone*!!
+From version 0.2.0, `Dropbox::API::File#delete` and `Dropbox::API::Dir#delete` *are gone*!!
 
 The reason is that it's based on Hashie::Mash and was screwing Hash#delete.
 
-It is replaced with Dropbox::API::File#destroy and Dropbox::API::Dir#destroy.
+It is replaced with `Dropbox::API::File#destroy` and `Dropbox::API::Dir#destroy`.
 
 Installation
 ------------
@@ -43,9 +43,10 @@ In order to use this client, you need to have an app created on https://www.drop
 Once you have it, put this configuration somewhere in your code, before you start working with the client.
 
 ```ruby
-Dropbox::API::Config.app_key    = YOUR_APP_TOKEN
+Dropbox::API::Config.app_key    = YOUR_APP_KEY
 Dropbox::API::Config.app_secret = YOUR_APP_SECRET
-Dropbox::API::Config.mode       = "sandbox" # if you have a single-directory app or "dropbox" if it has access to the whole dropbox
+Dropbox::API::Config.mode       = "sandbox" # if you have a single-directory app
+# Dropbox::API::Config.mode       = "dropbox" # if your app has access to the whole dropbox
 ```
 
 Dropbox::API::Client
@@ -54,6 +55,9 @@ Dropbox::API::Client
 The client is the base for all communication with the API and wraps around almost all calls
 available in the API.
 
+Web-based Authorization
+-----------------------
+
 In order to create a Dropbox::API::Client object, you need to have the configuration set up for OAuth.
 Second thing you need is to have the user authorize your app using OAuth. Here's a short intro
 on how to do this:
@@ -61,16 +65,20 @@ on how to do this:
 ```ruby
 consumer = Dropbox::API::OAuth.consumer(:authorize)
 request_token = consumer.get_request_token
+# Store the token and secret so after redirecting we have the same request token
+session[:token] = request_token.token
+session[:token_secret] = request_token.secret
 request_token.authorize_url(:oauth_callback => 'http://yoursite.com/callback')
 # Here the user goes to Dropbox, authorizes the app and is redirected
-# The oauth_token will be available in the params
-request_token.get_access_token(:oauth_verifier => oauth_token)
+hash = { oauth_token: session[:token], oauth_token_secret: session[:token_secret]}
+request_token  = OAuth::RequestToken.from_hash(consumer, hash)
+result = request_token.get_access_token(:oauth_verifier => oauth_token)
 ```
 
 Now that you have the oauth token and secret, you can create a new instance of the Dropbox::API::Client, like this:
 
 ```ruby
-client = Dropbox::API::Client.new :token => token, :secret => secret
+client = Dropbox::API::Client.new :token => result.token, :secret => result.secret
 ```
 
 Rake-based authorization
@@ -81,19 +89,20 @@ Dropbox::API supplies you with a helper rake which will authorize a single clien
 In order to have this rake available, put this on your Rakefile:
 
 ```ruby
+require "dropbox-api"
 require "dropbox-api/tasks"
 Dropbox::API::Tasks.install
 ```
 
 You will notice that you have a new rake task - dropbox:authorize
 
-When you call this Rake task, it will ask you to provide the consumer key and secret. Afterwards it will present you with an authorize url on Dropbox.
+When you call this Rake task, it will ask you to provide the app key and app secret. Afterwards it will present you with an authorize url on Dropbox.
 
 Simply go to that url, authorize the app, then press enter in the console.
 
 The rake task will output valid ruby code which you can use to create a client.
 
-What differs this from the DropBox Ruby SDK?
+What differs this from the Dropbox Ruby SDK?
 --------------------------------------------
 
 A few things:
@@ -194,6 +203,27 @@ Stores a file with a provided body under a provided name and returns a Dropbox::
 client.upload 'file.txt', 'file body' # => #<Dropbox::API::File>
 ```
 
+### Dropbox::API::Client#chunked_upload
+
+Stores a file using the chunked upload endpoint. This method issues multiple requests, and optionally takes a block, passing in the current upload byte offset and a unique ID usable for resuming uploads. Use this for uploading large files.
+
+For more info, see [https://www.dropbox.com/developers/reference/api#chunked-upload](https://www.dropbox.com/developers/reference/api#chunked-upload)
+
+Standard use:
+
+```ruby
+client.chunked_upload 'file.txt', 'file or IO object' # => #<Dropbox::API::File>
+```
+
+Using a block to show upload progress and save the upload id:
+
+```ruby
+client.chunked_upload 'file.txt', 'file or IO object' do |offset, resp|
+  @upload_id = resp[:upload_id]
+  puts "Uploaded #{offset} bytes"
+end
+```
+
 ### Dropbox::API::Client#download
 
 Downloads a file with a provided name and returns it's content
@@ -206,7 +236,7 @@ client.download 'file.txt' # => 'file body'
 
 When provided a pattern, returns a list of files or directories within that path
 
-Be default is searches the root path:
+By default it searches the root path:
 
 ```ruby
 client.search 'pattern' # => [#<Dropbox::API::File>, #<Dropbox::API::Dir>]
@@ -216,6 +246,24 @@ However, you can specify your own path:
 
 ```ruby
 client.search 'pattern', :path => 'somedir' # => [#<Dropbox::API::File>, #<Dropbox::API::Dir>]
+```
+
+### Dropbox::API::Client#delta
+
+Returns a cursor and a list of files that have changed since the cursor was generated.
+
+```ruby
+delta = client.delta 'abc123'
+delta.cursor # => 'def456'
+delta.entries # => [#<Dropbox::API::File>, #<Dropbox::API::Dir>]
+```
+
+When called without a cursor, it returns all the files.
+
+```ruby
+delta = client.delta 'abc123'
+delta.cursor # => 'abc123'
+delta.entries # => [#<Dropbox::API::File>, #<Dropbox::API::Dir>]
 ```
 
 Dropbox::API::File and Dropbox::API::Dir methods

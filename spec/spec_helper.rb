@@ -6,22 +6,31 @@ SimpleCov.start do
 end
 require 'dropbox-api'
 require 'rspec'
-
-# If you wand to change the json, you can do it here
-# I still believe yajl is the best :) - marcinbunsch
-MultiJson.engine= :yajl
+require 'webmock/rspec'
+require 'vcr'
 
 module Dropbox
   Spec = Hashie::Mash.new
 end
+
+VCR.configure do |c|
+  c.configure_rspec_metadata!
+  c.cassette_library_dir = 'spec/vcr/cassettes'
+  c.hook_into :webmock
+
+  c.filter_sensitive_data('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') do |interaction|
+    interaction.request.headers['Authorization'].first
+  end
+end
+
 
 Dir.glob("#{File.dirname(__FILE__)}/support/*.rb").each { |f| require f }
 
 # Clean up after specs, remove test-directory
 RSpec.configure do |config|
   config.after(:all) do
-    test_dir = Dropbox::Spec.instance.find(Dropbox::Spec.test_dir)
-    test_dir.destroy unless test_dir.is_deleted?
+    test_dir = Dropbox::Spec.instance.find(Dropbox::Spec.test_dir) rescue nil
+    test_dir.destroy if test_dir and !test_dir.is_deleted?
   end
 end
 
